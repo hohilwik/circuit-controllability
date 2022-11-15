@@ -3,7 +3,7 @@ C code for calculating circuit controllability and observability measures for a 
 
 # Input Format
 
-Circuit file, using a format similar to netlists. It should be easy enough to create a traversable graph of the circuit with resizing vectors.
+Circuit file, using a format similar to netlists. The program creates a traversable graph of the circuit with resizing vectors.
 ```
 INPUTS <number of input lines>
 1 2 3 4 5 // numbering for every input line
