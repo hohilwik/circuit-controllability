@@ -42,7 +42,7 @@ FANOUT 3 3 7 8 9
 - It performs breadth first search and depth first search for controllability and observability with calculation of the cost function of controllability/observability at passing of each node
 - It is implemented to be theoretically optimal and avoids recursion wherever possible
 - Memory complexity of the algorithm is 4(2N+P+G) where N is the number of fault sites, P is the number of inputs+outputs, and G is the number of gates+fanouts
-- Two variations of 32-bit Kogge-Stone Adder will be used to test the combinational circuit performance of the program, as it involves AND, OR, XOR, and NOT gates but can also be implemented with NAND and NOR gates
+- Two variations of 32-bit Kogge-Stone Adder will be used to test the combinational circuit performance of the program, as it involves several deep chains of AND, OR, XOR, and NOT gates but can also be implemented with NAND and NOR gates
 - A 16-bit shift register with scan chains will be used to test the sequential circuit performance of the program. This will enable testing of the program's capacity to deal with uncertain flip flop states
 - Work Distribution: Shirley
 - The program takes input in the form of a specified netlist format and outputs all measures for each node in the netlist
