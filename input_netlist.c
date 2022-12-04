@@ -887,7 +887,7 @@ int inputGraph(Vector *argInputs, int *inputnum, Vector *argOutputs, int *output
 	{
 		int type=MAXVAL, input_num=-1, output_num=-1;
 		fscanf(fp, "%s", buff);
-		printf("%s ", buff); 
+		//printf("%s ", buff); 
 		if( strcmp(buff, "AND")==0)
 		{
 			type = 1;
@@ -1027,9 +1027,9 @@ int inputGraph(Vector *argInputs, int *inputnum, Vector *argOutputs, int *output
 					}
 				}
 			}
-			free(frontier.arr);
+			//free(frontier.arr);
 			vector_init(&frontier);
-			free(newfront.arr);
+			//free(newfront.arr);
 			//free(drvin.arr);
 			}
 //printf("test06\n");
