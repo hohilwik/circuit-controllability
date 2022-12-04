@@ -19,6 +19,9 @@ FANOUT 3 3 7 8 9 // this has 1 input [3] and 3 outputs [7, 8, 9]
 #include<stdlib.h>
 #include<stdio.h>
 #include<string.h>
+#include<math.h>
+
+#define MAXVAL 200000
 
 typedef struct Vector{
 	int capacity, size;
@@ -27,8 +30,8 @@ typedef struct Vector{
 
 typedef struct Block{
 	int type, num_input, num_output;
-	Vector *inputlines, *outputlines;
-	Vector *inputLoc, *outputLoc;
+	Vector inputlines, outputlines;
+	Vector inputLoc, outputLoc;
 
 	// type
 	// 1 AND
@@ -36,22 +39,23 @@ typedef struct Block{
 	// 3 NOT
 	// 4 NAND
 	// 5 NOR
-	// 6 FANOUT
+	// 6 XOR
+	// 7 FANOUT
+	// 8 FLIPFLOP
 } Block;
 
 typedef struct Node{
 	int id;
+	int type;
+	// 1 for PI
+	// 2 for PO
+	// 0 for all others
 	int drv_out; // block it is the output of
-	Vector *drv_in; // blocks it is an input for
+	Vector drv_in; // blocks it is an input for
+	int zeroCombiControl, oneCombiControl, CombiObserve;
+	int zeroSeqControl, oneSeqControl, SeqObserve;
 } Node;
 
-typedef struct Gate{
-	int type;
-	int num_inputs;
-	int num_outputs;
-	Vector *inputlines;
-	Vector *outputlines;
-} Gate;
 
 int vector_init(Vector *v)
 {
@@ -64,11 +68,13 @@ int vector_init(Vector *v)
 
 int vector_insert(Vector *v, int val)
 {
-		int size=v->size++;
+		v->size++;
+		int size=v->size;
 		if(v->size==v->capacity)
 		{
 			v->capacity = 2*v->capacity;
 			int Cap = v->capacity;
+			/*
 			int *temp = (int*)malloc(Cap*sizeof(int));
 			for(int iter=0; iter<(size-1); iter++)
 			{
@@ -76,23 +82,437 @@ int vector_insert(Vector *v, int val)
 			}
 			//free(v->arr);
 			v->arr = temp;
-			//v->arr = realloc(v->arr, sizeof(int)*(v->capacity) );
+			*/
+			v->arr = (int*)realloc(v->arr, sizeof(int)*(Cap) );
 		}
 		v->arr[size-1] = val;
 		return v->capacity;
 }
 
+int sum_vector(Vector *v)
+{
+	int size=v->size;
+	int sum=0;
+	for(int i=0; i<size; i++)
+	{
+		sum=sum+v->arr[i];
+	}
+	return sum;
+}
+
+int min_vector(Vector *v)
+{
+	int size=v->size;
+	if(size==0) 
+	{
+		return MAXVAL;
+	}
+	int min=v->arr[0];
+	for(int i=0; i<size; i++)
+	{
+		if(v->arr[i]<min)
+		{
+			min = v->arr[i];
+		}
+	}
+	return min;
+}
+
 int block_init(Block *b)
 {
-	vector_init(b->inputlines);
-	vector_init(b->outputlines);
-	vector_init(b->inputLoc);
-	vector_init(b->outputLoc);
+	vector_init(&b->inputlines);
+	vector_init(&b->outputlines);
+	vector_init(&b->inputLoc);
+	vector_init(&b->outputLoc);
 	return 0;
 }
 
+int node_init(Node *n)
+{
+	vector_init(&n->drv_in);
+	n->id = -1;
+	n->type = 0;
+	n->drv_out = -1;
+	n->zeroCombiControl = MAXVAL;
+	n->oneCombiControl =  MAXVAL;
+	n->CombiObserve = MAXVAL;
+	n->zeroSeqControl = MAXVAL;
+	n->oneSeqControl = MAXVAL;
+	n->SeqObserve = MAXVAL;
+	return 0;
+}
 
-int inputGraph()
+int findZeroCombiControl(int nodenum, Node* nodeblock, Block* gates)
+{
+	int val = nodeblock[nodenum-1].zeroCombiControl;
+	if(val<MAXVAL)
+	{
+		return val;
+	}
+	int gateout = nodeblock[nodenum-1].drv_out;
+	if(gateout==-1)
+	{
+		return MAXVAL;
+	}
+	int gatetype = gates[gateout].type;
+	Vector inlines = gates[gateout].inputlines;
+	Vector outlines = gates[gateout].outputlines;
+	Vector invals;
+	vector_init(&invals);
+	Vector invalsOne;
+	vector_init(&invalsOne);
+	int size = inlines.size;
+	for(int i=0; i<size; i++)
+	{
+		int controlvalZero = findZeroCombiControl(inlines.arr[i], nodeblock, gates);
+		nodeblock[inlines.arr[i]-1].zeroCombiControl = controlvalZero;
+		vector_insert(&invals, controlvalZero);
+		
+		int controlvalOne = findOneCombiControl(inlines.arr[i], nodeblock, gates);
+		nodeblock[inlines.arr[i]-1].oneCombiControl = controlvalOne;
+		vector_insert(&invalsOne, controlvalOne);
+	}
+	// type
+	// 1 AND min(all inputs zeroControl)+1
+	// 2 OR sum(all inputs zeroControl)+1
+	// 3 NOT (input oneControl)+1
+	// 4 NAND sum(all inputs oneControl)+1
+	// 5 NOR min(all inputs oneControl)+1
+	// 6 XOR min( sum of all inputs zeroControl, sum of all inputs OneControl)+1
+	// 7 FANOUT (propagate input control to all outputs)
+	int controlOut;
+	if(gatetype==1)
+	{
+		controlOut = min_vector(&invals)+1;
+	}
+	else if(gatetype==2)
+	{
+		controlOut = sum_vector(&invals)+1;
+	}
+	else if(gatetype==3)
+	{
+		controlOut = min_vector(&invalsOne)+1;
+	}
+	else if(gatetype==4)
+	{
+		controlOut = sum_vector(&invalsOne)+1;
+	}
+	else if(gatetype==5)
+	{
+		controlOut = min_vector(&invalsOne)+1;
+	}
+	else if(gatetype==6)
+	{
+		int v1 = sum_vector(&invals);
+		int v2 = sum_vector(&invalsOne);
+		int vfinal = (v1<v2)?v1:v2;
+		controlOut = vfinal+1;
+	}
+	else if(gatetype==7)
+	{
+		controlOut = min_vector(&invals);
+		int fanout = outlines.size;
+		for(int i=0; i<fanout; i++)
+		{
+			if(nodeblock[ outlines.arr[i]-1 ].zeroCombiControl > controlOut)
+			{
+				nodeblock[ outlines.arr[i]-1 ].zeroCombiControl = controlOut;
+			}
+		}
+	}
+	else if(gatetype==8)
+	{
+		controlOut = 0;
+	}
+	// CLK and RST are assumed to have 0 CC0, CC1
+	nodeblock[nodenum-1].zeroCombiControl = controlOut;
+	free(inlines.arr);
+	free(outlines.arr);
+	free(invals.arr);
+	free(invalsOne.arr);
+	return controlOut;
+	
+}
+
+int findOneCombiControl(int nodenum, Node* nodeblock, Block* gates)
+{
+	int val = nodeblock[nodenum-1].oneCombiControl;
+	if(val<MAXVAL)
+	{
+		return val;
+	}
+	int gateout = nodeblock[nodenum-1].drv_out;
+	if(gateout==-1)
+	{
+		return MAXVAL;
+	}
+	int gatetype = gates[gateout].type;
+	Vector inlines = gates[gateout].inputlines;
+	Vector outlines = gates[gateout].outputlines;
+	Vector invals;
+	vector_init(&invals);
+	Vector invalsOne;
+	vector_init(&invalsOne);
+	int size = inlines.size;
+	for(int i=0; i<size; i++)
+	{
+		int controlvalZero = findZeroCombiControl(inlines.arr[i], nodeblock, gates);
+		nodeblock[inlines.arr[i]-1].zeroCombiControl = controlvalZero;
+		vector_insert(&invals, controlvalZero);
+		
+		int controlvalOne = findOneCombiControl(inlines.arr[i], nodeblock, gates);
+		nodeblock[inlines.arr[i]-1].oneCombiControl = controlvalOne;
+		vector_insert(&invalsOne, controlvalOne);
+	}
+	// type
+	// 1 AND sum(all inputs oneControl)+1
+	// 2 OR min(all inputs oneControl)+1
+	// 3 NOT (input zeroControl)+1
+	// 4 NAND min(all inputs zeroControl)+1
+	// 5 NOR sum(all inputs zeroControl)+1
+	// 6 XOR min( sum of all inputs zeroControl, sum of all inputs oneControl)+1
+	// 7 FANOUT (propagate input control to all outputs)
+	int controlOut;
+	if(gatetype==1)
+	{
+		controlOut = sum_vector(&invalsOne)+1;
+	}
+	else if(gatetype==2)
+	{
+		controlOut = min_vector(&invalsOne)+1;
+	}
+	else if(gatetype==3)
+	{
+		controlOut = min_vector(&invals)+1;
+	}
+	else if(gatetype==4)
+	{
+		controlOut = min_vector(&invals)+1;
+	}
+	else if(gatetype==5)
+	{
+		controlOut = sum_vector(&invals)+1;
+	}
+	else if(gatetype==6)
+	{
+		int v1 = sum_vector(&invals);
+		int v2 = sum_vector(&invalsOne);
+		int vfinal = (v1<v2)?v1:v2;
+		controlOut = vfinal+1;
+	}
+	else if(gatetype==7)
+	{
+		controlOut = min_vector(&invals);
+		int fanout = outlines.size;
+		for(int i=0; i<fanout; i++)
+		{
+			if(nodeblock[ outlines.arr[i]-1 ].oneCombiControl > controlOut)
+			{
+				nodeblock[ outlines.arr[i]-1 ].oneCombiControl = controlOut;
+			}
+		}
+	}
+	else if(gatetype==8)
+	{
+		controlOut = min_vector(&invalsOne);
+	}
+	// CLK and RST are assumed to have 0 CC0, CC1
+	nodeblock[nodenum-1].oneCombiControl = controlOut;
+	free(inlines.arr);
+	free(outlines.arr);
+	free(invals.arr);
+	free(invalsOne.arr);
+	return controlOut;
+	
+}
+
+//sequential
+int findZeroSeqControl(int nodenum, Node* nodeblock, Block* gates)
+{
+	int val = nodeblock[nodenum-1].zeroSeqControl;
+	if(val<MAXVAL)
+	{
+		return val;
+	}
+	int gateout = nodeblock[nodenum-1].drv_out;
+	if(gateout==-1)
+	{
+		return MAXVAL;
+	}
+	int gatetype = gates[gateout].type;
+	Vector inlines = gates[gateout].inputlines;
+	Vector outlines = gates[gateout].outputlines;
+	Vector invals;
+	vector_init(&invals);
+	Vector invalsOne;
+	vector_init(&invalsOne);
+	int size = inlines.size;
+	for(int i=0; i<size; i++)
+	{
+		int controlvalZero = findZeroSeqControl(inlines.arr[i], nodeblock, gates);
+		nodeblock[inlines.arr[i]-1].zeroSeqControl = controlvalZero;
+		vector_insert(&invals, controlvalZero);
+		
+		int controlvalOne = findOneSeqControl(inlines.arr[i], nodeblock, gates);
+		nodeblock[inlines.arr[i]-1].oneSeqControl = controlvalOne;
+		vector_insert(&invalsOne, controlvalOne);
+	}
+	// type
+	// 1 AND min(all inputs zeroControl)
+	// 2 OR sum(all inputs zeroControl)
+	// 3 NOT (input oneControl)
+	// 4 NAND sum(all inputs oneControl)
+	// 5 NOR min(all inputs oneControl)
+	// 6 XOR min( sum of all inputs zeroControl, sum of all inputs OneControl)
+	// 7 FANOUT (propagate input control to all outputs)
+	int controlOut;
+	if(gatetype==1)
+	{
+		controlOut = min_vector(&invals);
+	}
+	else if(gatetype==2)
+	{
+		controlOut = sum_vector(&invals);
+	}
+	else if(gatetype==3)
+	{
+		controlOut = min_vector(&invalsOne);
+	}
+	else if(gatetype==4)
+	{
+		controlOut = sum_vector(&invalsOne);
+	}
+	else if(gatetype==5)
+	{
+		controlOut = min_vector(&invalsOne);
+	}
+	else if(gatetype==6)
+	{
+		int v1 = sum_vector(&invals);
+		int v2 = sum_vector(&invalsOne);
+		int vfinal = (v1<v2)?v1:v2;
+		controlOut = vfinal;
+	}
+	else if(gatetype==7)
+	{
+		controlOut = min_vector(&invals);
+		int fanout = outlines.size;
+		for(int i=0; i<fanout; i++)
+		{
+			if(nodeblock[ outlines.arr[i]-1 ].zeroSeqControl > controlOut)
+			{
+				nodeblock[ outlines.arr[i]-1 ].zeroSeqControl = controlOut;
+			}
+		}
+	}
+	else if(gatetype==8)
+	{
+		controlOut = 0;
+	}
+	// CLK and RST are assumed to have 0 CC0, CC1
+	nodeblock[nodenum-1].zeroSeqControl = controlOut;
+	free(inlines.arr);
+	free(outlines.arr);
+	free(invals.arr);
+	free(invalsOne.arr);
+	return controlOut;
+	
+}
+
+int findOneSeqControl(int nodenum, Node* nodeblock, Block* gates)
+{
+	int val = nodeblock[nodenum-1].oneSeqControl;
+	if(val<MAXVAL)
+	{
+		return val;
+	}
+	int gateout = nodeblock[nodenum-1].drv_out;
+	if(gateout==-1)
+	{
+		return MAXVAL;
+	}
+	int gatetype = gates[gateout].type;
+	Vector inlines = gates[gateout].inputlines;
+	Vector outlines = gates[gateout].outputlines;
+	Vector invals;
+	vector_init(&invals);
+	Vector invalsOne;
+	vector_init(&invalsOne);
+	int size = inlines.size;
+	for(int i=0; i<size; i++)
+	{
+		int controlvalZero = findZeroSeqControl(inlines.arr[i], nodeblock, gates);
+		nodeblock[inlines.arr[i]-1].zeroSeqControl = controlvalZero;
+		vector_insert(&invals, controlvalZero);
+		
+		int controlvalOne = findOneSeqControl(inlines.arr[i], nodeblock, gates);
+		nodeblock[inlines.arr[i]-1].oneSeqControl = controlvalOne;
+		vector_insert(&invalsOne, controlvalOne);
+	}
+	// type
+	// 1 AND sum(all inputs oneControl)
+	// 2 OR min(all inputs oneControl)
+	// 3 NOT (input zeroControl)
+	// 4 NAND min(all inputs zeroControl)
+	// 5 NOR sum(all inputs zeroControl)
+	// 6 XOR min( sum of all inputs zeroControl, sum of all inputs oneControl)
+	// 7 FANOUT (propagate input control to all outputs)
+	int controlOut;
+	if(gatetype==1)
+	{
+		controlOut = sum_vector(&invalsOne);
+	}
+	else if(gatetype==2)
+	{
+		controlOut = min_vector(&invalsOne);
+	}
+	else if(gatetype==3)
+	{
+		controlOut = min_vector(&invals);
+	}
+	else if(gatetype==4)
+	{
+		controlOut = min_vector(&invals);
+	}
+	else if(gatetype==5)
+	{
+		controlOut = sum_vector(&invals);
+	}
+	else if(gatetype==6)
+	{
+		int v1 = sum_vector(&invals);
+		int v2 = sum_vector(&invalsOne);
+		int vfinal = (v1<v2)?v1:v2;
+		controlOut = vfinal;
+	}
+	else if(gatetype==7)
+	{
+		controlOut = min_vector(&invals);
+		int fanout = outlines.size;
+		for(int i=0; i<fanout; i++)
+		{
+			if(nodeblock[ outlines.arr[i]-1 ].zeroSeqControl > controlOut)
+			{
+				nodeblock[ outlines.arr[i]-1 ].zeroSeqControl = controlOut;
+			}
+		}
+	}
+	else if(gatetype==8)
+	{
+		controlOut = min_vector(&invalsOne);
+	}
+	// CLK and RST are assumed to have 0 CC0, CC1
+	nodeblock[nodenum-1].oneSeqControl = controlOut;
+	free(inlines.arr);
+	free(outlines.arr);
+	free(invals.arr);
+	free(invalsOne.arr);
+	return controlOut;
+	
+}
+
+
+int inputGraph(Vector *argInputs, int *inputnum, Vector *argOutputs, int *outputnum, Vector *argNodes, int *nodenum, Block *argBlocks, int *gatenum)
 {
 //printf("start\n");
 	FILE *fp;
@@ -161,6 +581,7 @@ int inputGraph()
 		vector_insert(&outputs, out_node);
 	}
 	
+//printf("test4\n");
 	fscanf(fp, "%s", buff);
 	
 	if( strcmp(buff, "NODES")!=0 )
@@ -180,6 +601,8 @@ int inputGraph()
 	Vector nodes;
 	vector_init(&nodes);
 	
+//printf("test5\n");
+	
 	int nodeindex;
 	
 	for(int i=0; i<node_num; i++)
@@ -190,8 +613,24 @@ int inputGraph()
 			printf("Node index cannot be larger than node_num");
 			exit(0);
 		}
-		vector_insert(&nodes, nodeindex); 
+		vector_insert(&nodes, nodeindex);
 	}
+	
+//printf("test6");
+	
+	Node *nodeblock = (Node*)malloc(sizeof(Node)*node_num);
+	
+	for(int z=0; z<node_num; z++)
+	{
+		node_init(&nodeblock[z]);
+	}
+	
+	for(int z=0; z<node_num; z++)
+	{
+		int tempval = nodes.arr[z];
+		nodeblock[ tempval ].id = tempval;
+	}
+	
 	
 //printf("%d\n", nodes.size);
 
@@ -207,24 +646,138 @@ int inputGraph()
 
 	if(gate_num<=0)
 	{
-		printf("nodes_num error");
+		printf("gates_num error");
 		return -1;
 	}
 	
-	Vector gates;
-	vector_init(&gates);
+	Block *gates;
+	gates = (Block*)malloc(gate_num*sizeof(Block));
 	
-	int gateindex;
-
-
+	for(int z=0; z<gate_num; z++)
+	{
+		block_init(&gates[z]);
+	}
 	
-	//fclose(fp);
+	for(int z=0; z<gate_num; z++)
+	{
+		int type=MAXVAL, input_num=-1, output_num=-1;
+		fscanf(fp, "%s", buff);
+		printf("%s ", buff); 
+		if( strcmp(buff, "AND")==0)
+		{
+			type = 1;
+			output_num = 1;
+		}
+		else if(strcmp(buff, "OR")==0)
+		{
+			type = 2;
+			output_num = 1;
+		}
+		else if(strcmp(buff, "NOT")==0)
+		{
+			type = 3;
+			output_num = 1;
+		}
+		else if(strcmp(buff, "NAND")==0)
+		{
+			type = 4;
+			output_num = 1;
+		}
+		else if(strcmp(buff, "NOR")==0)
+		{
+			type = 5;
+			output_num = 1;
+		}
+		else if(strcmp(buff, "XOR")==0)
+		{
+			type = 6;
+			output_num = 1;
+		}
+		else if(strcmp(buff, "FANOUT")==0)
+		{
+			type = 7;
+			input_num = 1;
+		}
+		else if(strcmp(buff, "FLIPFLOP")==0)
+		{
+			type = 8;
+			input_num = 1;
+			output_num = 1;
+		}
+		else if(type==MAXVAL)
+		{
+			printf("Invalid gate type");
+			return -1;
+		}
+		
+		gates[z].type = type;
+		
+		if(type==7)
+		{
+			fscanf(fp, "%d", &output_num);
+		}
+		if(type<=6)
+		{
+			fscanf(fp, "%d", &input_num);
+		}
+		
+		gates[z].num_output = output_num;
+		gates[z].num_input = input_num;
+		
+		for(int in=0; in<input_num; in++)
+		{
+			int inval;
+			fscanf(fp, "%d", &inval);
+			vector_insert(&gates[z].inputlines, inval);
+			vector_insert(&nodeblock[inval-1].drv_in, z);
+		}
+			
+		for(int out=0; out<output_num; out++)
+		{
+			int outval;
+			fscanf(fp, "%d", &outval);
+			vector_insert(&gates[z].outputlines, outval);
+			nodeblock[ outval-1 ].drv_out = z;
+		}
+		
+	}
+	
+	int PInum = inputs.size;
+	int POnum = outputs.size;
+	int numnodes = nodes.size;
+	
+	for(int i=0; i<numnodes; i++)
+	{
+		nodeblock[ nodes.arr[i]-1 ].id = 0;
+	}
+	for(int i=0; i<PInum; i++)
+	{
+		nodeblock[ inputs.arr[i]-1 ].id = 1;
+	}
+	for(int i=0; i<POnum; i++)
+	{
+		nodeblock[ outputs.arr[i]-1 ].id = 2;
+	}
+	
+	
+	
+	fclose(fp);
 	return 0;
 
 }
 
 int main()
 {
-	inputGraph();
+	int *inputnum, *outputnum, *nodenum, *gatenum;
+	Vector *argInputs, *argOutputs, *argNodes;
+	Block *argBlocks;
+	for(int i=0; i<1; i++)
+	{
+	int r=inputGraph(argInputs, inputnum, argOutputs, outputnum, argNodes, nodenum, argBlocks, gatenum);
+		if(r==-1)
+		{
+			exit(0);
+		}
+	}
 	return 0;
 }
