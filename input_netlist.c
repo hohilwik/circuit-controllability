@@ -118,6 +118,23 @@ int min_vector(Vector *v)
 	return min;
 }
 
+int compare_vector(Vector *v1, Vector *v2)
+{
+	if(v1->size!=v2->size)
+	{
+		return -1;
+	}
+	int size=v1->size;
+	for(int i=0; i<size; i++)
+	{
+		if(v1->arr[i]!=v2->arr[i])
+		{
+			return -1;
+		}
+	}
+	return 0;
+}
+
 int block_init(Block *b)
 {
 	vector_init(&b->inputlines);
@@ -226,10 +243,11 @@ int findZeroCombiControl(int nodenum, Node* nodeblock, Block* gates)
 	}
 	// CLK and RST are assumed to have 0 CC0, CC1
 	nodeblock[nodenum-1].zeroCombiControl = controlOut;
-	free(inlines.arr);
-	free(outlines.arr);
-	free(invals.arr);
-	free(invalsOne.arr);
+	//free(inlines.arr);
+	//free(outlines.arr);
+	//free(invals.arr);
+	//free(invalsOne.arr);
+	//printf("%d %d %d\n", nodeblock[nodenum].id, nodeblock[nodenum].zeroCombiControl, nodeblock[nodenum].oneCombiControl);
 	return controlOut;
 	
 }
@@ -318,10 +336,11 @@ int findOneCombiControl(int nodenum, Node* nodeblock, Block* gates)
 	}
 	// CLK and RST are assumed to have 0 CC0, CC1
 	nodeblock[nodenum-1].oneCombiControl = controlOut;
-	free(inlines.arr);
-	free(outlines.arr);
-	free(invals.arr);
-	free(invalsOne.arr);
+	//printf("%d %d %d\n", nodeblock[nodenum].id, nodeblock[nodenum].zeroCombiControl, nodeblock[nodenum].oneCombiControl);
+	//free(inlines.arr);
+	//free(outlines.arr);
+	//free(invals.arr);
+	//free(invalsOne.arr);
 	return controlOut;
 	
 }
@@ -411,10 +430,10 @@ int findZeroSeqControl(int nodenum, Node* nodeblock, Block* gates)
 	}
 	// CLK and RST are assumed to have 0 CC0, CC1
 	nodeblock[nodenum-1].zeroSeqControl = controlOut;
-	free(inlines.arr);
-	free(outlines.arr);
-	free(invals.arr);
-	free(invalsOne.arr);
+	//free(inlines.arr);
+	//free(outlines.arr);
+	//free(invals.arr);
+	//free(invalsOne.arr);
 	return controlOut;
 	
 }
@@ -503,14 +522,220 @@ int findOneSeqControl(int nodenum, Node* nodeblock, Block* gates)
 	}
 	// CLK and RST are assumed to have 0 CC0, CC1
 	nodeblock[nodenum-1].oneSeqControl = controlOut;
-	free(inlines.arr);
-	free(outlines.arr);
-	free(invals.arr);
-	free(invalsOne.arr);
+	//free(inlines.arr);
+	//free(outlines.arr);
+	//free(invals.arr);
+	//free(invalsOne.arr);
 	return controlOut;
 	
 }
 
+// observability
+int findCombiObserve(int nodenum, Node* nodeblock, Block* gates)
+{
+	int val = nodeblock[nodenum-1].CombiObserve;
+	if(val<MAXVAL)
+	{
+		return val;
+	}
+int obsStart = MAXVAL;
+int observeOut = MAXVAL;
+int iterlen = nodeblock[nodenum-1].drv_in.size;
+for(int iter=0; iter<iterlen; iter++)
+{
+	int gateout = nodeblock[nodenum-1].drv_in.arr[iter];
+	if(gateout==-1)
+	{
+		return MAXVAL;
+	}
+	int gatetype = gates[gateout].type;
+	Vector inlines = gates[gateout].inputlines;
+	Vector outlines = gates[gateout].outputlines;
+	Vector invals;
+	vector_init(&invals);
+	Vector invalsOne;
+	vector_init(&invalsOne);
+	Vector outObserve;
+	vector_init(&outObserve);
+	int size = inlines.size;
+	for(int i=0; i<size; i++)
+	{
+		if(inlines.arr[i]==nodenum)
+		{
+			continue;
+		}
+		int controlvalZero = findZeroCombiControl(inlines.arr[i], nodeblock, gates);
+		nodeblock[inlines.arr[i]-1].zeroCombiControl = controlvalZero;
+		vector_insert(&invals, controlvalZero);
+		
+		int controlvalOne = findOneCombiControl(inlines.arr[i], nodeblock, gates);
+		nodeblock[inlines.arr[i]-1].oneCombiControl = controlvalOne;
+		vector_insert(&invalsOne, controlvalOne);
+	}
+	int outnum=outlines.size;
+	for(int i=0; i<outnum; i++)
+	{
+		vector_insert(&outObserve, findCombiObserve(outlines.arr[i], nodeblock, gates) );
+	}
+	// type
+	// 1 AND min(outObserve)+sum(input oneControl)+1
+	// 2 OR min(outObserve)+sum(input zeroControl)+1
+	// 3 NOT min(outObserve)+1
+	// 4 NAND min(outObserve)+sum(input oneControl)+1
+	// 5 NOR min(outObserve)+sum(input zeroControl)+1
+	// 6 XOR min(outObserve)+min( sum(input oneControl), sum(input zeroControl) )+1
+	// 7 FANOUT min(outObserve)
+	if(gatetype==1)
+	{
+		observeOut = min_vector(&outObserve)+sum_vector(&invalsOne)+1;
+	}
+	else if(gatetype==2)
+	{
+		observeOut = min_vector(&outObserve)+sum_vector(&invals)+1;
+	}
+	else if(gatetype==3)
+	{
+		observeOut = min_vector(&outObserve)+1;
+	}
+	else if(gatetype==4)
+	{
+		observeOut = min_vector(&outObserve)+sum_vector(&invalsOne)+1;
+	}
+	else if(gatetype==5)
+	{
+		observeOut = min_vector(&outObserve)+sum_vector(&invals)+1;
+	}
+	else if(gatetype==6)
+	{
+		int v1 = sum_vector(&invals);
+		int v2 = sum_vector(&invalsOne);
+		int vfinal = (v1<v2)?v1:v2;
+		observeOut = min_vector(&outObserve)+vfinal+1;
+	}
+	else if(gatetype==7)
+	{
+		observeOut = min_vector(&outObserve);
+	}
+	else if(gatetype==8)
+	{
+		observeOut = min_vector(&outObserve)+findZeroCombiControl(nodenum, nodeblock, gates)+findOneCombiControl(nodenum, nodeblock, gates);
+	}
+	// CLK and RST are assumed to have 0 CC0, CC1
+	obsStart = (obsStart<observeOut)?obsStart:observeOut;
+}
+	observeOut = obsStart;
+	nodeblock[nodenum-1].CombiObserve = observeOut;
+	//free(inlines.arr);
+	//free(outlines.arr);
+	//free(invals.arr);
+	//free(invalsOne.arr);
+	//printf("%d %d %d\n", nodeblock[nodenum].id, nodeblock[nodenum].zeroCombiControl, nodeblock[nodenum].oneCombiControl);
+	return observeOut;
+	
+}
+
+int findSeqObserve(int nodenum, Node* nodeblock, Block* gates)
+{
+	int val = nodeblock[nodenum-1].CombiObserve;
+	if(val<MAXVAL)
+	{
+		return val;
+	}
+int obsStart = MAXVAL;
+int observeOut = MAXVAL;
+int iterlen = nodeblock[nodenum-1].drv_in.size;
+for(int iter=0; iter<iterlen; iter++)
+{
+	int gateout = nodeblock[nodenum-1].drv_in.arr[iter];
+	if(gateout==-1)
+	{
+		return MAXVAL;
+	}
+	int gatetype = gates[gateout].type;
+	Vector inlines = gates[gateout].inputlines;
+	Vector outlines = gates[gateout].outputlines;
+	Vector invals;
+	vector_init(&invals);
+	Vector invalsOne;
+	vector_init(&invalsOne);
+	Vector outObserve;
+	vector_init(&outObserve);
+	int size = inlines.size;
+	for(int i=0; i<size; i++)
+	{
+		if(inlines.arr[i]==nodenum)
+		{
+			continue;
+		}
+		int controlvalZero = findZeroCombiControl(inlines.arr[i], nodeblock, gates);
+		nodeblock[inlines.arr[i]-1].zeroCombiControl = controlvalZero;
+		vector_insert(&invals, controlvalZero);
+		
+		int controlvalOne = findOneCombiControl(inlines.arr[i], nodeblock, gates);
+		nodeblock[inlines.arr[i]-1].oneCombiControl = controlvalOne;
+		vector_insert(&invalsOne, controlvalOne);
+	}
+	int outnum=outlines.size;
+	for(int i=0; i<outnum; i++)
+	{
+		vector_insert(&outObserve, findCombiObserve(outlines.arr[i], nodeblock, gates) );
+	}
+	// type
+	// 1 AND min(outObserve)+sum(input oneControl)+1
+	// 2 OR min(outObserve)+sum(input zeroControl)+1
+	// 3 NOT min(outObserve)+1
+	// 4 NAND min(outObserve)+sum(input oneControl)+1
+	// 5 NOR min(outObserve)+sum(input zeroControl)+1
+	// 6 XOR min(outObserve)+min( sum(input oneControl), sum(input zeroControl) )+1
+	// 7 FANOUT min(outObserve)
+	if(gatetype==1)
+	{
+		observeOut = min_vector(&outObserve)+sum_vector(&invalsOne);
+	}
+	else if(gatetype==2)
+	{
+		observeOut = min_vector(&outObserve)+sum_vector(&invals);
+	}
+	else if(gatetype==3)
+	{
+		observeOut = min_vector(&outObserve);
+	}
+	else if(gatetype==4)
+	{
+		observeOut = min_vector(&outObserve)+sum_vector(&invalsOne);
+	}
+	else if(gatetype==5)
+	{
+		observeOut = min_vector(&outObserve)+sum_vector(&invals);
+	}
+	else if(gatetype==6)
+	{
+		int v1 = sum_vector(&invals);
+		int v2 = sum_vector(&invalsOne);
+		int vfinal = (v1<v2)?v1:v2;
+		observeOut = min_vector(&outObserve)+vfinal;
+	}
+	else if(gatetype==7)
+	{
+		observeOut = min_vector(&outObserve);
+	}
+	else if(gatetype==8)
+	{
+		observeOut = min_vector(&outObserve)+findZeroCombiControl(nodenum, nodeblock, gates)+findOneCombiControl(nodenum, nodeblock, gates)+1;
+	}
+	// CLK and RST are assumed to have 0 CC0, CC1
+	obsStart = (obsStart<observeOut)?obsStart:observeOut;
+}
+	observeOut = obsStart;
+	nodeblock[nodenum-1].CombiObserve = observeOut;
+	//free(inlines.arr);
+	//free(outlines.arr);
+	//free(invals.arr);
+	//free(invalsOne.arr);
+	//printf("%d %d %d\n", nodeblock[nodenum].id, nodeblock[nodenum].zeroCombiControl, nodeblock[nodenum].oneCombiControl);
+	return observeOut;
+	
+}
 
 int inputGraph(Vector *argInputs, int *inputnum, Vector *argOutputs, int *outputnum, Vector *argNodes, int *nodenum, Block *argBlocks, int *gatenum)
 {
@@ -628,7 +853,7 @@ int inputGraph(Vector *argInputs, int *inputnum, Vector *argOutputs, int *output
 	for(int z=0; z<node_num; z++)
 	{
 		int tempval = nodes.arr[z];
-		nodeblock[ tempval ].id = tempval;
+		nodeblock[ tempval-1 ].id = tempval;
 	}
 	
 	
@@ -742,24 +967,136 @@ int inputGraph(Vector *argInputs, int *inputnum, Vector *argOutputs, int *output
 		
 	}
 	
+//printf("test01\n");
+	
 	int PInum = inputs.size;
 	int POnum = outputs.size;
 	int numnodes = nodes.size;
 	
 	for(int i=0; i<numnodes; i++)
 	{
-		nodeblock[ nodes.arr[i]-1 ].id = 0;
+		nodeblock[ nodes.arr[i]-1 ].type = 0;
 	}
 	for(int i=0; i<PInum; i++)
 	{
-		nodeblock[ inputs.arr[i]-1 ].id = 1;
+		nodeblock[ inputs.arr[i]-1 ].type = 1;
+		nodeblock[ inputs.arr[i]-1 ].zeroCombiControl = 0;
+		nodeblock[ inputs.arr[i]-1 ].oneCombiControl = 0;
+		nodeblock[ inputs.arr[i]-1 ].zeroSeqControl = 0;
+		nodeblock[ inputs.arr[i]-1 ].oneSeqControl = 0;
+		
 	}
 	for(int i=0; i<POnum; i++)
 	{
-		nodeblock[ outputs.arr[i]-1 ].id = 2;
+		nodeblock[ outputs.arr[i]-1 ].type = 2;
+		nodeblock[ outputs.arr[i]-1 ].CombiObserve = 0;
+		nodeblock[ outputs.arr[i]-1 ].SeqObserve = 0;
 	}
 	
+//printf("test02\n");
 	
+	Vector frontier = inputs;
+	int frontsize = frontier.size;
+	while(frontsize!=0)
+	{
+		Vector newfront, newblocklist;
+		vector_init(&newfront);
+		for(int i=0; i<frontsize; i++)
+		{
+			if( nodeblock[frontier.arr[i]-1].type!=2 )
+			{
+			Vector drvin = nodeblock[ frontier.arr[i]-1 ].drv_in;
+			int numblocks = drvin.size;
+//printf("test03\n");
+			for(int j=0; j<numblocks; j++)
+			{
+				int addsize = gates[ drvin.arr[j] ].outputlines.size;
+				for(int k=0; k<addsize; k++)
+				{
+					int nodeval = gates[ drvin.arr[j] ].outputlines.arr[k];
+//printf("test04\n");
+					if(nodeval == 0)
+					{
+						continue;
+					}
+					
+					if( nodeblock[nodeval-1].type==0 )
+					{
+						vector_insert(&newfront, nodeval);
+//printf("test05\n");
+					}
+				}
+			}
+			free(frontier.arr);
+			vector_init(&frontier);
+			free(newfront.arr);
+			//free(drvin.arr);
+			}
+//printf("test06\n");
+			frontier = newfront;
+			frontsize = frontier.size;
+			
+			for(int j=0; j<frontsize; j++)
+			{
+				nodeblock[frontier.arr[j]-1].zeroCombiControl = findZeroCombiControl(frontier.arr[j], nodeblock, gates);
+				nodeblock[frontier.arr[j]-1].oneCombiControl = findOneCombiControl(frontier.arr[j], nodeblock, gates);
+				nodeblock[frontier.arr[j]-1].zeroSeqControl = findZeroSeqControl(frontier.arr[j], nodeblock, gates);
+				nodeblock[frontier.arr[j]-1].oneSeqControl = findOneSeqControl(frontier.arr[j], nodeblock, gates);
+			}
+		}
+	}
+	
+	printf("\nCombinational Controllability\n");
+	for(int i=0; i<numnodes; i++)
+	{
+		nodeblock[i].zeroCombiControl = findZeroCombiControl(nodeblock[i].id, nodeblock, gates);
+		nodeblock[i].oneCombiControl = findOneCombiControl(nodeblock[i].id, nodeblock, gates);
+		
+		printf("%d %d %d\n", nodeblock[i].id, nodeblock[i].zeroCombiControl, nodeblock[i].oneCombiControl);
+	}
+	printf("\nSequential Controllability\n");
+	for(int i=0; i<numnodes; i++)
+	{
+		nodeblock[i].zeroSeqControl = findZeroSeqControl(nodeblock[i].id, nodeblock, gates);
+		nodeblock[i].oneSeqControl = findOneSeqControl(nodeblock[i].id, nodeblock, gates);
+		
+		printf("%d %d %d\n", nodeblock[i].id, nodeblock[i].zeroSeqControl, nodeblock[i].oneSeqControl);
+	}
+	printf("\nCombinational Observability\n");
+	for(int i=0; i<numnodes; i++)
+	{
+		nodeblock[i].CombiObserve = findCombiObserve(nodeblock[i].id, nodeblock, gates);
+		
+		printf("%d %d\n", nodeblock[i].id, nodeblock[i].CombiObserve);
+	}
+
+	Vector observevec, oldvec;
+	vector_init(&observevec);
+	vector_init(&oldvec);
+	for(int i=0; i<numnodes; i++)
+	{
+		nodeblock[i].SeqObserve = findSeqObserve(nodeblock[i].id, nodeblock, gates);
+		vector_insert(&observevec, nodeblock[i].SeqObserve);
+	}
+	oldvec = observevec;
+	vector_init(&observevec);
+		
+	while(compare_vector(&observevec, &oldvec)!=0)
+	{
+		oldvec = observevec;
+		vector_init(&observevec);
+		for(int i=0; i<numnodes; i++)
+		{
+			nodeblock[i].SeqObserve = findSeqObserve(nodeblock[i].id, nodeblock, gates);
+			vector_insert(&observevec, nodeblock[i].SeqObserve);
+		}
+		
+	}
+	printf("\nSequential Observability\n");
+	for(int i=0; i<numnodes; i++)
+	{	
+		printf("%d %d\n", nodeblock[i].id, nodeblock[i].SeqObserve);
+	}
 	
 	fclose(fp);
 	return 0;
